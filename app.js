@@ -10,6 +10,9 @@
 // - say()
 // - costume_change("file.png")
 // - costume_next()
+// - size(...)
+// - set_size(...)
+// - import_image("https://...")
 // - help popup
 // - save/load project as JSON
 // - tab indentation + auto-indent after colon
@@ -63,8 +66,10 @@ const output = document.getElementById("output");
 // ------------------------------------------------------
 // 3. GLOBAL STATE
 // ------------------------------------------------------
-const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 const SPRITE_SIZE = 80;
+const MIN_SPRITE_SIZE = 10;
+const MAX_SPRITE_SIZE = 400;
 
 const backgroundFiles = PROJECT_FILES.filter(
   (file) => isImageFile(file) && file.toLowerCase().includes("background")
@@ -89,9 +94,33 @@ let dragState = {
 // ------------------------------------------------------
 // 4. UTILITIES
 // ------------------------------------------------------
+function isImageUrl(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return /^(https?:\/\/|data:image\/|blob:)/i.test(trimmed);
+}
+
 function isImageFile(filename) {
-  const lower = filename.toLowerCase();
+  if (typeof filename !== "string") return false;
+
+  const trimmed = filename.trim();
+  if (isImageUrl(trimmed)) return true;
+
+  const lower = trimmed.toLowerCase().split("?")[0].split("#")[0];
   return IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+function getDisplayNameForImage(file) {
+  if (typeof file !== "string") return "";
+  if (!isImageUrl(file)) return file;
+
+  try {
+    const url = new URL(file);
+    const lastPart = url.pathname.split("/").filter(Boolean).pop();
+    return lastPart || url.hostname;
+  } catch (_) {
+    return file.length > 50 ? file.slice(0, 47) + "..." : file;
+  }
 }
 
 function log(message) {
@@ -148,9 +177,14 @@ function makeDefaultScript(name) {
   ].join("\n");
 }
 
+function getSpritePixelSize(sprite) {
+  const percent = Number(sprite.size) || 100;
+  return clamp((SPRITE_SIZE * percent) / 100, MIN_SPRITE_SIZE, MAX_SPRITE_SIZE);
+}
+
 function clampSpriteToStage(sprite) {
   const { width, height } = getStageSize();
-  const half = SPRITE_SIZE / 2;
+  const half = getSpritePixelSize(sprite) / 2;
   sprite.x = clamp(sprite.x, half, Math.max(half, width - half));
   sprite.y = clamp(sprite.y, half, Math.max(half, height - half));
 }
@@ -172,6 +206,37 @@ function setSpritePosition(sprite, x, y) {
   }
 }
 
+function normalizeSpriteSize(value) {
+  return clamp(Number(value) || 0, MIN_SPRITE_SIZE, MAX_SPRITE_SIZE);
+}
+
+function addImageToSpriteLibrary(imageUrl) {
+  if (!isImageFile(imageUrl)) {
+    throw new Error("That does not look like a direct image link.");
+  }
+
+  if (!spriteFiles.includes(imageUrl)) {
+    spriteFiles.push(imageUrl);
+    renderSpriteImageOptions();
+  }
+}
+
+function addCostumeToSprite(sprite, imageUrl) {
+  addImageToSpriteLibrary(imageUrl);
+
+  if (!Array.isArray(sprite.costumes)) {
+    sprite.costumes = [];
+  }
+
+  if (!sprite.costumes.includes(imageUrl)) {
+    sprite.costumes.push(imageUrl);
+  }
+
+  sprite.image = imageUrl;
+  sprite.costumeIndex = sprite.costumes.indexOf(imageUrl);
+  if (sprite.costumeIndex < 0) sprite.costumeIndex = 0;
+}
+
 // ------------------------------------------------------
 // 5. SPRITE CREATION / MANAGEMENT
 // ------------------------------------------------------
@@ -181,21 +246,21 @@ function createSprite() {
   const name = "Sprite " + sprites.length;
 
   const sprite = {
-  	id,
-  	name,
-  	image,
-  	costumes: spriteFiles.length > 0 ? [...spriteFiles] : image ? [image] : [],
-  	costumeIndex: Math.max(0, spriteFiles.indexOf(image)),
-  	x: 100 + sprites.length * 40,
-  	y: 100 + sprites.length * 30,
-  	angle: 0,
-  	size: 100,
-  	visible: true,
-  	sayText: "",
-  	script: makeDefaultScript(name),
-  	dom: null,
-  	speechDom: null
-   };
+    id,
+    name,
+    image,
+    costumes: spriteFiles.length > 0 ? [...spriteFiles] : image ? [image] : [],
+    costumeIndex: Math.max(0, spriteFiles.indexOf(image)),
+    x: 100 + sprites.length * 40,
+    y: 100 + sprites.length * 30,
+    angle: 0,
+    size: 100,
+    visible: true,
+    sayText: "",
+    script: makeDefaultScript(name),
+    dom: null,
+    speechDom: null
+  };
 
   if (sprite.costumeIndex < 0) sprite.costumeIndex = 0;
 
@@ -237,7 +302,7 @@ function renderBackgroundOptions() {
   backgroundFiles.forEach((file) => {
     const option = document.createElement("option");
     option.value = file;
-    option.textContent = file;
+    option.textContent = getDisplayNameForImage(file);
     backgroundSelect.appendChild(option);
   });
 
@@ -260,7 +325,7 @@ function renderSpriteImageOptions() {
   spriteFiles.forEach((file) => {
     const option = document.createElement("option");
     option.value = file;
-    option.textContent = file;
+    option.textContent = getDisplayNameForImage(file);
     spriteImageSelect.appendChild(option);
   });
 }
@@ -325,8 +390,12 @@ function renderStage() {
       spriteEl.classList.add("dragging");
     }
 
+    const pixelSize = getSpritePixelSize(sprite);
+
     spriteEl.style.left = `${sprite.x}px`;
     spriteEl.style.top = `${sprite.y}px`;
+    spriteEl.style.width = `${pixelSize}px`;
+    spriteEl.style.height = `${pixelSize}px`;
     spriteEl.style.transform = `translate(-50%, -50%) rotate(${sprite.angle}deg)`;
     spriteEl.style.display = sprite.visible ? "block" : "none";
 
@@ -430,7 +499,17 @@ function saveSelectedSpriteFromEditor() {
 
 function updateSpriteCostumeList(sprite) {
   if (!sprite) return;
-  sprite.costumes = spriteFiles.length > 0 ? [...spriteFiles] : (sprite.image ? [sprite.image] : []);
+
+  const localOrKnownImages = spriteFiles.length > 0 ? [...spriteFiles] : [];
+  const existingCostumes = Array.isArray(sprite.costumes) ? sprite.costumes.filter(isImageFile) : [];
+  const merged = [...new Set([...existingCostumes, ...localOrKnownImages])];
+
+  sprite.costumes = merged.length > 0 ? merged : (sprite.image ? [sprite.image] : []);
+
+  if (sprite.image && !sprite.costumes.includes(sprite.image) && isImageFile(sprite.image)) {
+    sprite.costumes.push(sprite.image);
+  }
+
   let idx = sprite.costumes.indexOf(sprite.image);
   if (idx === -1) {
     if (sprite.costumes.length > 0) {
@@ -440,6 +519,7 @@ function updateSpriteCostumeList(sprite) {
       idx = 0;
     }
   }
+
   sprite.costumeIndex = idx;
 }
 
@@ -499,7 +579,7 @@ function saveProjectToFile() {
   saveSelectedSpriteFromEditor();
 
   const data = {
-    version: 1,
+    version: 2,
     background: backgroundSelect.value,
     sprites: sprites.map((sprite) => ({
       id: sprite.id,
@@ -510,6 +590,7 @@ function saveProjectToFile() {
       x: sprite.x,
       y: sprite.y,
       angle: sprite.angle,
+      size: sprite.size,
       visible: sprite.visible,
       sayText: sprite.sayText,
       script: sprite.script
@@ -543,21 +624,40 @@ function loadProjectFromFile(file) {
         throw new Error("Invalid project file.");
       }
 
-      sprites = data.sprites.map((item, index) => ({
-        id: item.id || "sprite_" + (index + 1),
-        name: item.name || `Sprite ${index + 1}`,
-        image: item.image || spriteFiles[0] || "",
-        costumes: Array.isArray(item.costumes) && item.costumes.length > 0 ? item.costumes : [...spriteFiles],
-        costumeIndex: Number.isInteger(item.costumeIndex) ? item.costumeIndex : 0,
-        x: Number(item.x) || 100,
-        y: Number(item.y) || 100,
-        angle: Number(item.angle) || 0,
-        visible: item.visible !== false,
-        sayText: typeof item.sayText === "string" ? item.sayText : "",
-        script: typeof item.script === "string" ? item.script : "",
-        dom: null,
-        speechDom: null
-      }));
+      sprites = data.sprites.map((item, index) => {
+        const costumes = Array.isArray(item.costumes) && item.costumes.length > 0
+          ? item.costumes.filter(isImageFile)
+          : [...spriteFiles];
+
+        costumes.forEach((costume) => {
+          if (isImageUrl(costume) && !spriteFiles.includes(costume)) {
+            spriteFiles.push(costume);
+          }
+        });
+
+        if (isImageUrl(item.image) && !spriteFiles.includes(item.image)) {
+          spriteFiles.push(item.image);
+        }
+
+        return {
+          id: item.id || "sprite_" + (index + 1),
+          name: item.name || `Sprite ${index + 1}`,
+          image: item.image || spriteFiles[0] || "",
+          costumes,
+          costumeIndex: Number.isInteger(item.costumeIndex) ? item.costumeIndex : 0,
+          x: Number(item.x) || 100,
+          y: Number(item.y) || 100,
+          angle: Number(item.angle) || 0,
+          size: normalizeSpriteSize(item.size == null ? 100 : item.size),
+          visible: item.visible !== false,
+          sayText: typeof item.sayText === "string" ? item.sayText : "",
+          script: typeof item.script === "string" ? item.script : "",
+          dom: null,
+          speechDom: null
+        };
+      });
+
+      renderSpriteImageOptions();
 
       spriteIdCounter = sprites.length + 1;
 
@@ -992,6 +1092,7 @@ function syncScopeFromSprite(sprite, scope) {
   scope.x = sprite.x;
   scope.y = sprite.y;
   scope.angle = sprite.angle;
+  scope.size = sprite.size;
   scope.visible = sprite.visible;
   scope.costume = sprite.image;
 }
@@ -1000,6 +1101,7 @@ function syncSpriteFromScope(sprite, scope) {
   if (typeof scope.x === "number") sprite.x = scope.x;
   if (typeof scope.y === "number") sprite.y = scope.y;
   if (typeof scope.angle === "number") sprite.angle = scope.angle;
+  if (typeof scope.size === "number") sprite.size = normalizeSpriteSize(scope.size);
   if (typeof scope.visible === "boolean") sprite.visible = scope.visible;
 
   clampSpriteToStage(sprite);
@@ -1009,7 +1111,7 @@ function syncSpriteFromScope(sprite, scope) {
 
 function isTouchingEdge(sprite) {
   const { width, height } = getStageSize();
-  const half = SPRITE_SIZE / 2;
+  const half = getSpritePixelSize(sprite) / 2;
 
   return (
     sprite.x - half <= 0 ||
@@ -1021,11 +1123,21 @@ function isTouchingEdge(sprite) {
 
 function setSpriteImage(sprite, filename) {
   if (!filename) return;
-  if (!spriteFiles.includes(filename)) {
+  if (!isImageFile(filename)) {
     throw new Error(`Unknown costume "${filename}"`);
   }
 
+  if (isImageUrl(filename) && !spriteFiles.includes(filename)) {
+    spriteFiles.push(filename);
+    renderSpriteImageOptions();
+  }
+
   updateSpriteCostumeList(sprite);
+
+  if (!sprite.costumes.includes(filename)) {
+    sprite.costumes.push(filename);
+  }
+
   sprite.image = filename;
   sprite.costumeIndex = sprite.costumes.indexOf(filename);
   if (sprite.costumeIndex < 0) sprite.costumeIndex = 0;
@@ -1161,6 +1273,38 @@ async function builtin_costume_next(sprite, scope) {
   renderSpriteSettings();
 }
 
+async function builtin_size(sprite, scope, expr, helpers) {
+  const change = Number(evaluateExpression(expr, scope, helpers)) || 0;
+  sprite.size = normalizeSpriteSize((Number(sprite.size) || 100) + change);
+  clampSpriteToStage(sprite);
+  syncScopeFromSprite(sprite, scope);
+  renderStage();
+  renderSpriteSettings();
+}
+
+async function builtin_set_size(sprite, scope, expr, helpers) {
+  const newSize = Number(evaluateExpression(expr, scope, helpers)) || 0;
+  sprite.size = normalizeSpriteSize(newSize);
+  clampSpriteToStage(sprite);
+  syncScopeFromSprite(sprite, scope);
+  renderStage();
+  renderSpriteSettings();
+}
+
+async function builtin_import_image(sprite, scope, expr, helpers) {
+  const imageUrl = String(evaluateExpression(expr, scope, helpers)).trim();
+
+  if (!imageUrl) {
+    throw new Error('import_image(...) needs a direct image URL');
+  }
+
+  addCostumeToSprite(sprite, imageUrl);
+  syncScopeFromSprite(sprite, scope);
+  renderStage();
+  renderSpriteSettings();
+  log(`[${sprite.name}] Imported image: ${getDisplayNameForImage(imageUrl)}`);
+}
+
 // ------------------------------------------------------
 // 12. EXECUTION ENGINE
 // ------------------------------------------------------
@@ -1238,6 +1382,21 @@ async function executeCall(statement, sprite, scope, helpers) {
     case "costume_next":
       if (args.length !== 0) throw new Error("costume_next() takes 0 arguments");
       await builtin_costume_next(sprite, scope);
+      return;
+
+    case "size":
+      if (args.length !== 1) throw new Error("size(...) takes 1 argument");
+      await builtin_size(sprite, scope, args[0], helpers);
+      return;
+
+    case "set_size":
+      if (args.length !== 1) throw new Error("set_size(...) takes 1 argument");
+      await builtin_set_size(sprite, scope, args[0], helpers);
+      return;
+
+    case "import_image":
+      if (args.length !== 1) throw new Error("import_image(...) takes 1 argument");
+      await builtin_import_image(sprite, scope, args[0], helpers);
       return;
 
     default:
@@ -1323,6 +1482,7 @@ async function runSpriteScript(sprite) {
     x: sprite.x,
     y: sprite.y,
     angle: sprite.angle,
+    size: sprite.size,
     visible: sprite.visible,
     costume: sprite.image
   };
