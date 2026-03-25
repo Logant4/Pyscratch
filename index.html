@@ -69,9 +69,15 @@
             </div>
           </div>
 
-          <div class="form-row">
-            <label for="sprite-angle-input">Angle</label>
-            <input id="sprite-angle-input" type="number" />
+          <div class="form-row two-col">
+            <div>
+              <label for="sprite-angle-input">Angle</label>
+              <input id="sprite-angle-input" type="number" />
+            </div>
+            <div>
+              <label for="sprite-size-input">Size %</label>
+              <input id="sprite-size-input" type="number" min="10" max="400" step="1" />
+            </div>
           </div>
         </section>
 
@@ -80,6 +86,8 @@
           <p class="hint">
             Use Python-style code like
             <code>say("Hello")</code>,
+            <code>size(20)</code>,
+            <code>import_image("https://...")</code>,
             <code>if x &gt; 10:</code>,
             <code>for i in range(4):</code>
           </p>
@@ -124,6 +132,10 @@ hide()
 show()
 costume_change("cat.png")
 costume_next()
+size(20)
+size(-15)
+set_size(150)
+import_image("https://example.com/picture.png")
         </pre>
 
         <h3>Control</h3>
@@ -172,13 +184,29 @@ range(10, 0, -1)
 
         <h3>Example program</h3>
         <pre>
-steps = 30
+say("Starting!", 1)
+set_size(130)
 
 for i in range(4):
-    move(steps)
+    move(30)
     turn(90)
 
+size(-20)
 say("Square done!", 2)
+        </pre>
+
+        <h3>Image importing note</h3>
+        <pre>
+Use a direct image link.
+
+Good:
+import_image("https://website.com/image.png")
+
+Best way:
+Right click an image on the web
+then choose "Copy image link"
+
+A normal Google search page link will not work.
         </pre>
       </div>
     </div>
