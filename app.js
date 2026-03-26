@@ -13,6 +13,9 @@
 // - size(...)
 // - set_size(...)
 // - import_image("https://...")
+// - input("question")
+// - key_pressed("a"), any_key_pressed(), last_key()
+// - stage-only keyboard capture (must click stage first)
 // - help popup
 // - save/load project as JSON
 // - tab indentation + auto-indent after colon
@@ -59,6 +62,7 @@ const spriteImageSelect = document.getElementById("sprite-image-select");
 const spriteXInput = document.getElementById("sprite-x-input");
 const spriteYInput = document.getElementById("sprite-y-input");
 const spriteAngleInput = document.getElementById("sprite-angle-input");
+const spriteSizeInput = document.getElementById("sprite-size-input");
 
 const codeEditor = document.getElementById("code-editor");
 const output = document.getElementById("output");
@@ -89,6 +93,14 @@ let dragState = {
   spriteId: null,
   offsetX: 0,
   offsetY: 0
+};
+
+let stageHasKeyboardFocus = false;
+let keyboardState = {
+  pressedKeys: new Set(),
+  lastKey: "",
+  lastPhysicalKey: "",
+  lastCode: ""
 };
 
 // ------------------------------------------------------
@@ -237,6 +249,93 @@ function addCostumeToSprite(sprite, imageUrl) {
   if (sprite.costumeIndex < 0) sprite.costumeIndex = 0;
 }
 
+function normalizeKeyName(value) {
+  return String(value || "").toLowerCase();
+}
+
+function normalizeKeyboardEventKey(key) {
+  if (typeof key !== "string") return "";
+
+  switch (key) {
+    case " ":
+      return "space";
+    case "ArrowUp":
+      return "arrowup";
+    case "ArrowDown":
+      return "arrowdown";
+    case "ArrowLeft":
+      return "arrowleft";
+    case "ArrowRight":
+      return "arrowright";
+    case "Escape":
+      return "escape";
+    case "Enter":
+      return "enter";
+    case "Tab":
+      return "tab";
+    case "Backspace":
+      return "backspace";
+    case "Delete":
+      return "delete";
+    case "Shift":
+      return "shift";
+    case "Control":
+      return "control";
+    case "Alt":
+      return "alt";
+    default:
+      return key.toLowerCase();
+  }
+}
+
+function normalizePhysicalKeyCode(code) {
+  if (typeof code !== "string") return "";
+  return code.toLowerCase();
+}
+
+function clearKeyboardState() {
+  keyboardState.pressedKeys.clear();
+  keyboardState.lastKey = "";
+  keyboardState.lastPhysicalKey = "";
+  keyboardState.lastCode = "";
+}
+
+function setStageKeyboardFocus(active) {
+  stageHasKeyboardFocus = !!active;
+
+  if (stageHasKeyboardFocus) {
+    stage.classList.add("stage-keyboard-active");
+    if (typeof stage.focus === "function") {
+      try {
+        stage.focus({ preventScroll: true });
+      } catch (_) {
+        try {
+          stage.focus();
+        } catch (_) {}
+      }
+    }
+  } else {
+    stage.classList.remove("stage-keyboard-active");
+    clearKeyboardState();
+  }
+}
+
+function isTypingTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName ? target.tagName.toLowerCase() : "";
+
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target.isContentEditable
+  );
+}
+
+function isInsideStage(target) {
+  return !!(target && stage.contains(target));
+}
+
 // ------------------------------------------------------
 // 5. SPRITE CREATION / MANAGEMENT
 // ------------------------------------------------------
@@ -356,6 +455,7 @@ function renderSpriteSettings() {
   spriteXInput.disabled = !hasSprite;
   spriteYInput.disabled = !hasSprite;
   spriteAngleInput.disabled = !hasSprite;
+  spriteSizeInput.disabled = !hasSprite;
   codeEditor.disabled = !hasSprite;
 
   if (!sprite) {
@@ -364,6 +464,7 @@ function renderSpriteSettings() {
     spriteXInput.value = "";
     spriteYInput.value = "";
     spriteAngleInput.value = "";
+    spriteSizeInput.value = "";
     return;
   }
 
@@ -372,6 +473,7 @@ function renderSpriteSettings() {
   spriteXInput.value = Math.round(sprite.x);
   spriteYInput.value = Math.round(sprite.y);
   spriteAngleInput.value = Math.round(sprite.angle);
+  spriteSizeInput.value = Math.round(sprite.size);
 }
 
 function renderCodeEditor() {
@@ -425,6 +527,7 @@ function renderStage() {
     spriteEl.addEventListener("click", (e) => {
       e.stopPropagation();
       setSelectedSprite(sprite.id);
+      setStageKeyboardFocus(true);
     });
 
     spritesLayer.appendChild(spriteEl);
@@ -451,6 +554,7 @@ function startDraggingSprite(event, spriteId) {
   if (!sprite) return;
 
   setSelectedSprite(sprite.id);
+  setStageKeyboardFocus(true);
 
   const point = getStageRelativePoint(event.clientX, event.clientY);
 
@@ -682,6 +786,8 @@ function loadProjectFromFile(file) {
 }
 
 function hookEvents() {
+  stage.tabIndex = 0;
+
   backgroundSelect.addEventListener("change", () => {
     renderBackground();
   });
@@ -731,6 +837,15 @@ function hookEvents() {
     renderStage();
   });
 
+  spriteSizeInput.addEventListener("input", () => {
+    const sprite = getSelectedSprite();
+    if (!sprite) return;
+    sprite.size = normalizeSpriteSize(spriteSizeInput.value);
+    clampSpriteToStage(sprite);
+    renderStage();
+    renderSpriteSettings();
+  });
+
   codeEditor.addEventListener("input", () => {
     saveSelectedSpriteFromEditor();
   });
@@ -770,6 +885,88 @@ function hookEvents() {
   helpBtn.addEventListener("click", openHelp);
   helpCloseBtn.addEventListener("click", closeHelp);
   helpCloseBackdrop.addEventListener("click", closeHelp);
+
+  stage.addEventListener("pointerdown", () => {
+    setStageKeyboardFocus(true);
+  });
+
+  stage.addEventListener("click", () => {
+    setStageKeyboardFocus(true);
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target;
+
+    if (isInsideStage(target)) {
+      setStageKeyboardFocus(true);
+      return;
+    }
+
+    if (isTypingTarget(target) || !isInsideStage(target)) {
+      setStageKeyboardFocus(false);
+    }
+  });
+
+  document.addEventListener("focusin", (event) => {
+    const target = event.target;
+
+    if (isInsideStage(target)) {
+      setStageKeyboardFocus(true);
+      return;
+    }
+
+    if (isTypingTarget(target) || !isInsideStage(target)) {
+      setStageKeyboardFocus(false);
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (!stageHasKeyboardFocus) return;
+    if (isTypingTarget(document.activeElement) && document.activeElement !== stage) return;
+
+    const normalizedKey = normalizeKeyboardEventKey(e.key);
+    const normalizedCode = normalizePhysicalKeyCode(e.code);
+
+    if (normalizedKey) {
+      keyboardState.pressedKeys.add(normalizedKey);
+      keyboardState.lastKey = normalizedKey;
+      keyboardState.lastPhysicalKey = normalizedKey;
+    }
+
+    if (normalizedCode) {
+      keyboardState.pressedKeys.add(normalizedCode);
+      keyboardState.lastCode = normalizedCode;
+    }
+
+    if (
+      normalizedKey === "space" ||
+      normalizedKey === "arrowup" ||
+      normalizedKey === "arrowdown" ||
+      normalizedKey === "arrowleft" ||
+      normalizedKey === "arrowright" ||
+      normalizedKey === "tab"
+    ) {
+      e.preventDefault();
+    }
+  });
+
+  document.addEventListener("keyup", (e) => {
+    const normalizedKey = normalizeKeyboardEventKey(e.key);
+    const normalizedCode = normalizePhysicalKeyCode(e.code);
+
+    if (normalizedKey) {
+      keyboardState.pressedKeys.delete(normalizedKey);
+    }
+
+    if (normalizedCode) {
+      keyboardState.pressedKeys.delete(normalizedCode);
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    clearKeyboardState();
+    setStageKeyboardFocus(false);
+  });
 
   window.addEventListener("resize", () => {
     sprites.forEach(clampSpriteToStage);
@@ -1084,6 +1281,27 @@ function makeHelpersForSprite(sprite, scope) {
       const minV = Number(a);
       const maxV = Number(b);
       return Math.floor(Math.random() * (maxV - minV + 1)) + minV;
+    },
+
+    input: (message = "") => {
+      const result = window.prompt(String(message ?? ""));
+      return result == null ? "" : String(result);
+    },
+
+    key_pressed: (keyName) => {
+      if (!stageHasKeyboardFocus) return false;
+      const key = normalizeKeyName(keyName);
+      return keyboardState.pressedKeys.has(key);
+    },
+
+    any_key_pressed: () => {
+      if (!stageHasKeyboardFocus) return false;
+      return keyboardState.pressedKeys.size > 0;
+    },
+
+    last_key: () => {
+      if (!stageHasKeyboardFocus) return "";
+      return keyboardState.lastKey || "";
     }
   };
 }
@@ -1553,11 +1771,13 @@ function loadStarterSprites() {
     sprites[0].image = spriteFiles[0] || "";
     updateSpriteCostumeList(sprites[0]);
     sprites[0].script = [
-      `say("Testing")`,
+      `name = input("What is your name?")`,
+      `say("Hello " + name, 2)`,
       `for i in range(4):`,
       `    move(40)`,
       `    turn(90)`,
-      `say("Done", 1)`
+      `if key_pressed("space"):`,
+      `    say("Space was held!", 1)`
     ].join("\n");
   }
 
@@ -1568,17 +1788,16 @@ function loadStarterSprites() {
     sprites[1].y = 220;
     updateSpriteCostumeList(sprites[1]);
     sprites[1].script = [
-      `n = 0`,
       `while True:`,
-      `    if touching_edge():`,
-      `        turn(135)`,
-      `    elif n > 10:`,
-      `        costume_next()`,
-      `        n = 0`,
-      `    else:`,
-      `        move(10)`,
-      `    n = n + 1`,
-      `    wait(0.1)`
+      `    if key_pressed("arrowright"):`,
+      `        change_x(5)`,
+      `    elif key_pressed("arrowleft"):`,
+      `        change_x(-5)`,
+      `    elif key_pressed("arrowup"):`,
+      `        change_y(-5)`,
+      `    elif key_pressed("arrowdown"):`,
+      `        change_y(5)`,
+      `    wait(0.03)`
     ].join("\n");
   }
 
