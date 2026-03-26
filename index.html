@@ -86,6 +86,8 @@
           <p class="hint">
             Use Python-style code like
             <code>say("Hello")</code>,
+            <code>input("What is your name?")</code>,
+            <code>key_pressed("space")</code>,
             <code>size(20)</code>,
             <code>import_image("https://...")</code>,
             <code>if x &gt; 10:</code>,
@@ -138,6 +140,35 @@ set_size(150)
 import_image("https://example.com/picture.png")
         </pre>
 
+        <h3>Input</h3>
+        <pre>
+name = input("What is your name?")
+say("Hello " + name)
+
+key_pressed("a")
+key_pressed("space")
+key_pressed("arrowleft")
+key_pressed("arrowright")
+any_key_pressed()
+last_key()
+        </pre>
+
+        <h3>Keyboard input note</h3>
+        <pre>
+Keyboard input only works after clicking the stage.
+
+This makes sure key presses do not trigger
+while you are typing code or changing settings.
+
+Example:
+while True:
+    if key_pressed("arrowright"):
+        change_x(5)
+    if key_pressed("arrowleft"):
+        change_x(-5)
+    wait(0.03)
+        </pre>
+
         <h3>Control</h3>
         <pre>
 wait(1)
@@ -184,15 +215,19 @@ range(10, 0, -1)
 
         <h3>Example program</h3>
         <pre>
-say("Starting!", 1)
-set_size(130)
+name = input("What is your name?")
+say("Hi " + name, 1)
 
-for i in range(4):
-    move(30)
-    turn(90)
+while True:
+    if key_pressed("d"):
+        change_x(5)
+    elif key_pressed("a"):
+        change_x(-5)
 
-size(-20)
-say("Square done!", 2)
+    if key_pressed("space"):
+        say("Jump!", 0.2)
+
+    wait(0.03)
         </pre>
 
         <h3>Image importing note</h3>
